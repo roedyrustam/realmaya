@@ -18,14 +18,24 @@ function createMockPage(snapshot: DistilledPage): Page {
     press: vi.fn(async () => {}),
     scroll: vi.fn(async () => {}),
     waitForSelector: vi.fn(async () => {}),
+    waitForNetworkIdle: vi.fn(async () => {}),
+    waitForStable: vi.fn(async () => {}),
     evaluate: async <T>() => undefined as T,
     observe: async () => snapshot,
     act: async () => ({ ok: true, action: 'noop', cached: false }),
+    runAgent: async () => ({ completed: true, steps: [], finalSummary: 'done' }),
     extract: async <T>() => ({}) as T,
     fork: async () => createMockPage(snapshot),
     screenshot: async () => '',
     cookies: async () => [],
     setCookies: async () => {},
+    saveStorageState: async () => ({
+      url: snapshot.url,
+      cookies: [],
+      localStorage: {},
+      sessionStorage: {},
+    }),
+    loadStorageState: vi.fn(async () => {}),
     getNetworkLog: () => [],
     clearNetworkLog: () => {},
     mockRoute: vi.fn(async () => {}),
@@ -220,5 +230,84 @@ describe('IntentEngine & BranchManager', () => {
 
     await manager.closeAll();
     expect(manager.count).toBe(0);
+  });
+
+  it('executes multi-step autonomous runAgent() loop until goal completion and respects maxSteps', async () => {
+    const snapshot: DistilledPage = {
+      url: 'https://shop.test/checkout',
+      title: 'Checkout',
+      tokenEstimate: 30,
+      treeText: '<untrusted_dom>\n[1] button "Continue"\n</untrusted_dom>',
+      strippedHiddenNodes: 0,
+      nodes: [
+        {
+          id: 1,
+          role: 'button',
+          name: 'Continue',
+          tag: 'button',
+          fingerprint: 'button|button|continue|',
+          selector: '[data-realmaya-id="1"]',
+          bbox: { x: 0, y: 0, w: 100, h: 30 },
+        },
+      ],
+    };
+
+    let callCount = 0;
+    const llm: LlmProvider = {
+      name: 'mock-agent-llm',
+      completeJson: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            status: 'continue',
+            instruction: 'click Continue',
+            summary: 'Clicking continue',
+          };
+        }
+        if (callCount === 2) {
+          return { action: 'click', nodeId: 1 };
+        }
+        return { status: 'completed', summary: 'Checkout step completed' };
+      }),
+    };
+
+    const page = createMockPage(snapshot);
+    const engine = new IntentEngine(new LocatorCache(), llm);
+    const seenSteps: number[] = [];
+
+    const result = await engine.runAgent(page, 'Complete checkout', {
+      maxSteps: 4,
+      onStep: (rec) => {
+        seenSteps.push(rec.step);
+      },
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.steps.length).toBe(1);
+    expect(seenSteps).toEqual([1]);
+    expect(result.finalSummary).toBe('Checkout step completed');
+    expect(page.click).toHaveBeenCalledWith(1);
+
+    const infiniteLlm: LlmProvider = {
+      name: 'mock-loop-llm',
+      completeJson: async ({ prompt }) => {
+        if (prompt.startsWith('Goal:')) {
+          return {
+            status: 'continue',
+            instruction: 'click Continue',
+            summary: 'Still working',
+          } as never;
+        }
+        return { action: 'click', nodeId: 1 } as never;
+      },
+    };
+    const cappedResult = await new IntentEngine(new LocatorCache(), infiniteLlm).runAgent(
+      createMockPage(snapshot),
+      'Never finishes',
+      { maxSteps: 2 },
+    );
+    expect(cappedResult.completed).toBe(false);
+    expect(cappedResult.steps.length).toBe(2);
+    expect(cappedResult.finalSummary).toContain('maxSteps (2)');
   });
 });

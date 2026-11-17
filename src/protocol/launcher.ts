@@ -88,6 +88,7 @@ export async function launchBrowserProcess(
     executablePath?: string;
     args?: string[];
     timeoutMs: number;
+    detached?: boolean;
   },
 ): Promise<LaunchedBrowser> {
   const executable = findBrowserExecutable(engine, opts.executablePath);
@@ -118,6 +119,7 @@ export async function launchBrowserProcess(
   const child = spawn(executable, spawnArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    ...(opts.detached ? { detached: true } : {}),
   });
 
   const wsRegex =
@@ -170,7 +172,9 @@ export async function launchBrowserProcess(
       child.kill('SIGKILL');
     }
   };
-  process.once('exit', onProcessExit);
+  if (!opts.detached) {
+    process.once('exit', onProcessExit);
+  }
 
   let killed = false;
   const kill = async () => {

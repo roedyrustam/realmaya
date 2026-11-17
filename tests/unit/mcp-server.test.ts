@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { extractJsonObject } from '../../src/ai/provider.js';
 import { createRealmayaMcpServer } from '../../src/mcp/server.js';
+import { getDaemonFilePath, getDaemonStatus } from '../../src/protocol/daemon.js';
 import type { Page } from '../../src/types.js';
 
 function makeStubPage(id: string, contextId: string): Page {
@@ -19,6 +20,8 @@ function makeStubPage(id: string, contextId: string): Page {
     press: async () => {},
     scroll: async () => {},
     waitForSelector: async () => {},
+    waitForNetworkIdle: async () => {},
+    waitForStable: async () => {},
     evaluate: async <T>() => undefined as T,
     observe: async () => ({
       url: 'https://example.com',
@@ -29,11 +32,19 @@ function makeStubPage(id: string, contextId: string): Page {
       strippedHiddenNodes: 0,
     }),
     act: async () => ({ ok: true, action: 'noop', cached: false }),
+    runAgent: async () => ({ completed: true, steps: [], finalSummary: 'done' }),
     extract: async <T>() => ({}) as T,
     fork: async () => makeStubPage(`${id}-fork`, `${contextId}-fork`),
     screenshot: async () => '',
     cookies: async () => [],
     setCookies: async () => {},
+    saveStorageState: async () => ({
+      url: 'https://example.com',
+      cookies: [],
+      localStorage: {},
+      sessionStorage: {},
+    }),
+    loadStorageState: async () => {},
     getNetworkLog: () => [],
     clearNetworkLog: () => {},
     mockRoute: async () => {},
@@ -67,6 +78,7 @@ describe('MCP Server & JSON Extractor', () => {
             'browser_navigate',
             'browser_observe',
             'browser_act',
+            'browser_agent',
             'browser_extract',
             'browser_click',
             'browser_type',
@@ -76,6 +88,8 @@ describe('MCP Server & JSON Extractor', () => {
             'browser_fork',
             'browser_list_pages',
             'browser_screenshot',
+            'browser_storage_save',
+            'browser_storage_load',
             'browser_purge',
             'browser_close',
           ]),
@@ -103,5 +117,12 @@ describe('MCP Server & JSON Extractor', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('resolves daemon metadata paths for chrome and firefox', async () => {
+    expect(getDaemonFilePath('chrome')).toContain('daemon-chrome.json');
+    expect(getDaemonFilePath('firefox')).toContain('daemon-firefox.json');
+    const status = await getDaemonStatus('firefox');
+    expect(status === null || typeof status.pid === 'number').toBe(true);
   });
 });

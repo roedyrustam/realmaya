@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { findBrowserExecutable, launch } from '../../src/index.js';
@@ -138,5 +139,80 @@ describe.skipIf(!hasChrome)('Live Headless Chrome Integration', () => {
     const mockedResp = await page.evaluate<{ status: string; quota: number }>('window.__mockResp');
     expect(mockedResp).toEqual({ status: 'mocked-ok', quota: 5000 });
     expect(Array.isArray(page.getNetworkLog())).toBe(true);
+  });
+
+  it('traverses same-origin iframes, dispatches hardware trusted inputs, stabilizes DOM, and persists storageState', async () => {
+    await using browser = await launch({ engine: 'chrome', headless: true });
+    const page = await browser.newPage();
+
+    const iframeDoc =
+      '<!doctype html><html><body><button id="frame-btn" onclick="window.parent.__frameTrusted = event.isTrusted">Frame Submit</button></body></html>';
+    const mainHtml = encodeURIComponent(
+      [
+        '<!doctype html><html><head><title>Iframe & Trusted Suite</title></head><body>',
+        '<input id="trusted-input" placeholder="Trusted Input" />',
+        `<iframe id="sub" srcdoc="${iframeDoc.replace(/"/g, '&quot;')}" style="width:300px;height:120px;border:0"></iframe>`,
+        '<script>',
+        '  const inp = document.getElementById("trusted-input");',
+        '  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") window.__keyTrusted = e.isTrusted; });',
+        '  localStorage.setItem("session_token", "tok_live_99");',
+        '</script>',
+        '</body></html>',
+      ].join(''),
+    );
+
+    await page.goto(`data:text/html,${mainHtml}`);
+    await page.waitForStable({ quietWindowMs: 80, timeoutMs: 2000 });
+    await page.waitForNetworkIdle({ idleTimeMs: 80, timeoutMs: 2000 });
+
+    const obs = await page.observe();
+    const frameBtn = obs.nodes.find((n) => n.name === 'Frame Submit');
+    expect(frameBtn).toBeDefined();
+    await page.click(frameBtn!.id);
+    expect(
+      await page.evaluate<boolean>(
+        'window.__frameTrusted === false || window.__frameTrusted === true',
+      ),
+    ).toBe(true);
+
+    const inputNode = obs.nodes.find((n) => n.placeholder === 'Trusted Input');
+    expect(inputNode).toBeDefined();
+    await page.click(inputNode!.id, { trusted: true });
+    await page.type(inputNode!.id, 'hello-trusted', { clear: true, trusted: true });
+    await page.press(inputNode!.id, 'Enter', { trusted: true });
+
+    expect(await page.evaluate<string>('document.getElementById("trusted-input").value')).toBe(
+      'hello-trusted',
+    );
+    expect(await page.evaluate<boolean>('window.__keyTrusted')).toBe(true);
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body>OK</body></html>');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const httpOrigin = `http://127.0.0.1:${port}`;
+
+    try {
+      await page.goto(httpOrigin);
+      await page.evaluate(
+        '(() => { localStorage.setItem("session_token", "tok_live_99"); return true; })()',
+      );
+      const state = await page.saveStorageState();
+      expect(state.localStorage.session_token).toBe('tok_live_99');
+
+      const page2 = await browser.newPage();
+      await page2.goto(httpOrigin);
+      await page2.loadStorageState({
+        ...state,
+        url: 'about:blank',
+      });
+      expect(await page2.evaluate<string>('localStorage.getItem("session_token")')).toBe(
+        'tok_live_99',
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

@@ -23,6 +23,12 @@ export { RealmayaBrowser } from './browser/browser.js';
 export { RealmayaPage } from './browser/page.js';
 export { ProtocolError, RpcTransport } from './protocol/bidi-client.js';
 export {
+  getDaemonFilePath,
+  getDaemonStatus,
+  startDaemon,
+  stopDaemon,
+} from './protocol/daemon.js';
+export {
   BidiDriverAdapter,
   CdpDriverAdapter,
   type DriverAdapter,

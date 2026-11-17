@@ -20,6 +20,9 @@ export interface DriverAdapter {
   screenshot(handle: PageHandle): Promise<string>;
   getCookies(handle: PageHandle): Promise<BrowserCookie[]>;
   setCookies(handle: PageHandle, cookies: BrowserCookie[]): Promise<void>;
+  dispatchClick?(handle: PageHandle, x: number, y: number): Promise<void>;
+  dispatchKeys?(handle: PageHandle, text: string): Promise<void>;
+  dispatchKeyPress?(handle: PageHandle, key: string): Promise<void>;
   onNetworkExchange?(cb: (entry: NetworkExchange) => void): () => void;
 }
 
@@ -140,6 +143,58 @@ export class BidiDriverAdapter implements DriverAdapter {
         partition: { type: 'context', context: handle.pageId },
       });
     }
+  }
+
+  async dispatchClick(handle: PageHandle, x: number, y: number): Promise<void> {
+    await this.rpc.send('input.performActions', {
+      context: handle.pageId,
+      actions: [
+        {
+          type: 'pointer',
+          id: 'mouse',
+          parameters: { pointerType: 'mouse' },
+          actions: [
+            { type: 'pointerMove', x: Math.round(x), y: Math.round(y), duration: 0 },
+            { type: 'pointerDown', button: 0 },
+            { type: 'pointerUp', button: 0 },
+          ],
+        },
+      ],
+    });
+  }
+
+  async dispatchKeys(handle: PageHandle, text: string): Promise<void> {
+    const actions: Array<{ type: string; value: string }> = [];
+    for (const ch of text) {
+      actions.push({ type: 'keyDown', value: ch });
+      actions.push({ type: 'keyUp', value: ch });
+    }
+    await this.rpc.send('input.performActions', {
+      context: handle.pageId,
+      actions: [
+        {
+          type: 'key',
+          id: 'keyboard',
+          actions,
+        },
+      ],
+    });
+  }
+
+  async dispatchKeyPress(handle: PageHandle, key: string): Promise<void> {
+    await this.rpc.send('input.performActions', {
+      context: handle.pageId,
+      actions: [
+        {
+          type: 'key',
+          id: 'keyboard',
+          actions: [
+            { type: 'keyDown', value: key },
+            { type: 'keyUp', value: key },
+          ],
+        },
+      ],
+    });
   }
 
   onNetworkExchange(cb: (entry: NetworkExchange) => void): () => void {
@@ -302,6 +357,51 @@ export class CdpDriverAdapter implements DriverAdapter {
           httpOnly: c.httpOnly ?? false,
           secure: c.secure ?? false,
         })),
+      },
+      handle.pageId,
+    );
+  }
+
+  async dispatchClick(handle: PageHandle, x: number, y: number): Promise<void> {
+    const rx = Math.round(x);
+    const ry = Math.round(y);
+    await this.rpc.send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x: rx, y: ry },
+      handle.pageId,
+    );
+    await this.rpc.send(
+      'Input.dispatchMouseEvent',
+      { type: 'mousePressed', x: rx, y: ry, button: 'left', clickCount: 1 },
+      handle.pageId,
+    );
+    await this.rpc.send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseReleased', x: rx, y: ry, button: 'left', clickCount: 1 },
+      handle.pageId,
+    );
+  }
+
+  async dispatchKeys(handle: PageHandle, text: string): Promise<void> {
+    await this.rpc.send('Input.insertText', { text }, handle.pageId);
+  }
+
+  async dispatchKeyPress(handle: PageHandle, key: string): Promise<void> {
+    await this.rpc.send(
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyDown',
+        key,
+        ...(key === 'Enter' ? { windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 } : {}),
+      },
+      handle.pageId,
+    );
+    await this.rpc.send(
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyUp',
+        key,
+        ...(key === 'Enter' ? { windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 } : {}),
       },
       handle.pageId,
     );

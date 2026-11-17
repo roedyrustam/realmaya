@@ -2,6 +2,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { startHttpMcpServer, startStdioMcpServer } from '../src/mcp/server.js';
+import { getDaemonStatus, startDaemon, stopDaemon } from '../src/protocol/daemon.js';
 import { LocatorCache } from '../src/semantic/locator-cache.js';
 import type { BrowserEngine } from '../src/types.js';
 
@@ -29,6 +30,36 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'daemon') {
+    const subcommand = args[1] ?? 'status';
+    const engine: BrowserEngine = args.includes('--firefox') ? 'firefox' : 'chrome';
+    const headless = !args.includes('--headed') && !args.includes('--headless=false');
+
+    if (subcommand === 'start') {
+      const meta = await startDaemon({ engine, headless });
+      console.log(JSON.stringify({ ok: true, status: 'running', ...meta }, null, 2));
+      return;
+    }
+
+    if (subcommand === 'stop') {
+      const stopped = await stopDaemon(engine);
+      console.log(JSON.stringify({ ok: true, engine, stopped }, null, 2));
+      return;
+    }
+
+    const status = await getDaemonStatus(engine);
+    console.log(
+      JSON.stringify(
+        status
+          ? { ok: true, status: 'running', ...status }
+          : { ok: true, status: 'stopped', engine },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
   if (command === 'purge') {
     const cache = new LocatorCache(DEFAULT_CACHE_PATH);
     await cache.purge();
@@ -41,26 +72,30 @@ async function main(): Promise<void> {
       'realmaya — AI-Native Headless Browser & MCP Server (Chrome & Firefox)',
       '',
       'Usage:',
-      '  realmaya mcp [--chrome|--firefox] [--headed|--headless=false]   Start MCP server over stdio',
-      '  realmaya mcp --http [--port 3333] [--headed|--headless=false]   Start MCP server over Streamable HTTP',
-      '  realmaya purge                                                  Wipe local self-healing locator cache',
+      '  realmaya mcp [--chrome|--firefox] [--headed|--headless=false]         Start MCP server over stdio',
+      '  realmaya mcp --http [--port 3333] [--headed|--headless=false]         Start MCP server over Streamable HTTP',
+      '  realmaya daemon <start|stop|status> [--chrome|--firefox] [--headed]   Manage warm browser daemon',
+      '  realmaya purge                                                        Wipe local self-healing locator cache',
       '',
-      'MCP Tools:',
-      '  browser_launch       Launch headless Chrome or Firefox via WebDriver BiDi',
-      '  browser_navigate     Navigate active or specified page to a URL',
-      '  browser_observe      Extract token-compressed, prompt-injection-sanitized Semantic Tree',
-      '  browser_act          Execute natural-language intent via self-healing cache or MCP Sampling',
-      '  browser_extract      Extract structured JSON data from page content',
-      '  browser_click        Click element by distilled numeric ID or CSS selector',
-      '  browser_type         Type text into input element by numeric ID or CSS selector',
-      '  browser_select       Select an option in a <select> element by numeric ID or CSS selector',
-      '  browser_press        Press a keyboard key on an element by numeric ID or CSS selector',
-      '  browser_scroll       Scroll the page or a specific element',
-      '  browser_fork         Speculatively fork current page into an isolated parallel branch',
-      '  browser_list_pages   List all open pages and speculative fork() branches',
-      '  browser_screenshot   Capture PNG screenshot with optional Set-of-Mark [id] overlays',
-      '  browser_purge        Clear all local locator caches and session data (GDPR Art. 17)',
-      '  browser_close        Close a specific page/branch or shut down the browser',
+      'MCP Tools (18):',
+      '  browser_launch         Launch headless Chrome or Firefox via WebDriver BiDi',
+      '  browser_navigate       Navigate active or specified page to a URL',
+      '  browser_observe        Extract token-compressed, prompt-injection-sanitized Semantic Tree',
+      '  browser_act            Execute natural-language intent via self-healing cache or MCP Sampling',
+      '  browser_agent          Run autonomous multi-step agent loop (Observe -> Plan -> Act -> Stabilize)',
+      '  browser_extract        Extract structured JSON data from page content',
+      '  browser_click          Click element by distilled numeric ID or CSS selector',
+      '  browser_type           Type text into input element by numeric ID or CSS selector',
+      '  browser_select         Select an option in a <select> element by numeric ID or CSS selector',
+      '  browser_press          Press a keyboard key on an element by numeric ID or CSS selector',
+      '  browser_scroll         Scroll the page or a specific element',
+      '  browser_fork           Speculatively fork current page into an isolated parallel branch',
+      '  browser_list_pages     List all open pages and speculative fork() branches',
+      '  browser_storage_save   Save cookies, localStorage, and sessionStorage from active page',
+      '  browser_storage_load   Restore cookies, localStorage, and sessionStorage into active page',
+      '  browser_screenshot     Capture PNG screenshot with optional Set-of-Mark [id] overlays',
+      '  browser_purge          Clear all local locator caches and session data (GDPR Art. 17)',
+      '  browser_close          Close a specific page/branch or shut down the browser',
     ].join('\n'),
   );
 }

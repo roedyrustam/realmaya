@@ -36,6 +36,8 @@ export interface LaunchOptions {
   timeoutMs?: number;
   /** Optional guard hook invoked before destructive actions are executed by `page.act()`. */
   onDestructiveAction?: DestructiveActionGuard;
+  /** Attach to an active warm daemon (`realmaya daemon start`) if running. Defaults to `false`. */
+  reuseDaemon?: boolean;
 }
 
 /** Configuration options for connecting to an existing browser WebSocket endpoint. */
@@ -54,6 +56,15 @@ export interface ConnectOptions {
   timeoutMs?: number;
   /** Optional guard hook invoked before destructive actions are executed by `page.act()`. */
   onDestructiveAction?: DestructiveActionGuard;
+}
+
+/** Metadata stored for a persistent warm browser daemon (`~/.realmaya/daemon-<engine>.json`). */
+export interface DaemonMetadata {
+  engine: BrowserEngine;
+  wsUrl: string;
+  pid: number;
+  userDataDir: string;
+  startedAt: number;
 }
 
 /** Bounding box of a distilled interactive element in CSS pixels. */
@@ -128,6 +139,29 @@ export interface ActionResult {
   reason?: string;
 }
 
+/** Single step recorded during an autonomous `page.runAgent()` execution loop. */
+export interface AgentStepRecord {
+  step: number;
+  instruction: string;
+  actionResult: ActionResult;
+  url: string;
+}
+
+/** Configuration options for `page.runAgent()`. */
+export interface AgentLoopOptions {
+  /** Maximum number of autonomous Observe -> Plan -> Act steps. Defaults to `8`. */
+  maxSteps?: number;
+  /** Optional callback invoked after each step completes. */
+  onStep?: (record: AgentStepRecord) => void | Promise<void>;
+}
+
+/** Result returned by an autonomous multi-step `page.runAgent()` loop. */
+export interface AgentLoopResult {
+  completed: boolean;
+  steps: AgentStepRecord[];
+  finalSummary: string;
+}
+
 /** Options for speculative parallel branching via `page.fork()`. */
 export interface ForkOptions {
   /** Time-to-live in milliseconds before the forked context is auto-reaped. Defaults to `60000`. */
@@ -140,6 +174,12 @@ export interface ScreenshotOptions {
   setOfMark?: boolean;
 }
 
+/** Options for clicking an element, supporting hardware-level trusted input events. */
+export interface ClickOptions {
+  /** Dispatch hardware-level CDP/BiDi pointer events (`event.isTrusted === true`). */
+  trusted?: boolean;
+}
+
 /** Options for scrolling the page or a specific element. */
 export interface ScrollOptions {
   /** Horizontal scroll delta in CSS pixels. Defaults to `0`. */
@@ -148,6 +188,30 @@ export interface ScrollOptions {
   y?: number;
   /** Optional target element ID or CSS selector to scroll into view. */
   selectorOrId?: string | number;
+}
+
+/** Options for waiting until network traffic settles. */
+export interface WaitForNetworkIdleOptions {
+  /** Quiet window in milliseconds with zero new network exchanges. Defaults to `300`. */
+  idleTimeMs?: number;
+  /** Maximum wait timeout in milliseconds. Defaults to `5000`. */
+  timeoutMs?: number;
+}
+
+/** Options for waiting until DOM mutations settle. */
+export interface WaitForStableOptions {
+  /** Quiet window in milliseconds with zero DOM mutations. Defaults to `120`. */
+  quietWindowMs?: number;
+  /** Maximum wait timeout in milliseconds. Defaults to `3000`. */
+  timeoutMs?: number;
+}
+
+/** Serializable browser session state (`cookies`, `localStorage`, `sessionStorage`). */
+export interface StorageState {
+  url: string;
+  cookies: BrowserCookie[];
+  localStorage: Record<string, string>;
+  sessionStorage: Record<string, string>;
 }
 
 /** Captured network exchange entry for HAR-lite inspection and testing. */
@@ -189,20 +253,29 @@ export interface Page extends AsyncDisposable {
   url(): Promise<string>;
   title(): Promise<string>;
   goto(url: string, opts?: NavigateOptions): Promise<void>;
-  click(selectorOrId: string | number): Promise<void>;
-  type(selectorOrId: string | number, text: string, opts?: { clear?: boolean }): Promise<void>;
+  click(selectorOrId: string | number, opts?: ClickOptions): Promise<void>;
+  type(
+    selectorOrId: string | number,
+    text: string,
+    opts?: { clear?: boolean; trusted?: boolean },
+  ): Promise<void>;
   select(selectorOrId: string | number, value: string): Promise<void>;
-  press(selectorOrId: string | number, key: string): Promise<void>;
+  press(selectorOrId: string | number, key: string, opts?: { trusted?: boolean }): Promise<void>;
   scroll(opts?: ScrollOptions): Promise<void>;
   waitForSelector(selector: string, opts?: { timeoutMs?: number }): Promise<void>;
+  waitForNetworkIdle(opts?: WaitForNetworkIdleOptions): Promise<void>;
+  waitForStable(opts?: WaitForStableOptions): Promise<void>;
   evaluate<T>(fnOrExpression: string): Promise<T>;
   observe(opts?: ObserveOptions): Promise<DistilledPage>;
   act(instruction: string): Promise<ActionResult>;
+  runAgent(goal: string, opts?: AgentLoopOptions): Promise<AgentLoopResult>;
   extract<T>(instruction: string, schema: z.ZodType<T>): Promise<T>;
   fork(opts?: ForkOptions): Promise<Page>;
   screenshot(opts?: ScreenshotOptions): Promise<string>;
   cookies(): Promise<BrowserCookie[]>;
   setCookies(cookies: BrowserCookie[]): Promise<void>;
+  saveStorageState(filePath?: string): Promise<StorageState>;
+  loadStorageState(filePathOrState: string | StorageState): Promise<void>;
   getNetworkLog(): NetworkExchange[];
   clearNetworkLog(): void;
   mockRoute(urlSubstring: string, response: MockRouteResponse): Promise<void>;

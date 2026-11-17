@@ -234,6 +234,26 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
   );
 
   server.registerTool(
+    'browser_agent',
+    {
+      description:
+        'Run an autonomous multi-step agent loop (Observe -> Plan -> Act -> Stabilize) to achieve a high-level goal on the page.',
+      inputSchema: {
+        goal: z.string().min(1),
+        maxSteps: z.number().int().positive().max(25).optional(),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ goal, maxSteps, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      const result = await page.runAgent(goal, maxSteps !== undefined ? { maxSteps } : undefined);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ pageId: page.id, ...result }) }],
+      };
+    },
+  );
+
+  server.registerTool(
     'browser_extract',
     {
       description:
@@ -400,6 +420,63 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
       const pages = session.listPages();
       return {
         content: [{ type: 'text', text: JSON.stringify({ ok: true, pages }) }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'browser_storage_save',
+    {
+      description:
+        'Save cookies, localStorage, and sessionStorage from the active page (optionally writing to filePath).',
+      inputSchema: {
+        filePath: z.string().optional(),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ filePath, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      const state = await page.saveStorageState(filePath);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              pageId: page.id,
+              ...(filePath ? { filePath } : {}),
+              state,
+            }),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'browser_storage_load',
+    {
+      description:
+        'Restore cookies, localStorage, and sessionStorage into the active page from filePath.',
+      inputSchema: {
+        filePath: z.string().min(1),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ filePath, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      await page.loadStorageState(filePath);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              pageId: page.id,
+              filePath,
+            }),
+          },
+        ],
       };
     },
   );

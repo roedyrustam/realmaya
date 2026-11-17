@@ -1,5 +1,6 @@
 import { IntentEngine } from '../ai/intent-engine.js';
 import { RpcTransport } from '../protocol/bidi-client.js';
+import { getDaemonStatus } from '../protocol/daemon.js';
 import {
   BidiDriverAdapter,
   CdpDriverAdapter,
@@ -43,6 +44,22 @@ export class RealmayaBrowser implements Browser {
 
   static async launch(opts: LaunchOptions = {}): Promise<RealmayaBrowser> {
     const engine: BrowserEngine = opts.engine ?? 'chrome';
+
+    if (opts.reuseDaemon) {
+      const daemon = await getDaemonStatus(engine);
+      if (daemon) {
+        return RealmayaBrowser.connect({
+          wsUrl: daemon.wsUrl,
+          engine,
+          ...(opts.llm ? { llm: opts.llm } : {}),
+          ...(opts.maxBranches !== undefined ? { maxBranches: opts.maxBranches } : {}),
+          ...(opts.cachePath ? { cachePath: opts.cachePath } : {}),
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          ...(opts.onDestructiveAction ? { onDestructiveAction: opts.onDestructiveAction } : {}),
+        });
+      }
+    }
+
     const timeoutMs = opts.timeoutMs ?? 30_000;
     const launched = await launchBrowserProcess(engine, {
       headless: opts.headless ?? true,

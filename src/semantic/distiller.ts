@@ -72,8 +72,41 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
         if (el.shadowRoot) {
           results.push(...collectAllElements(el.shadowRoot, selector));
         }
+        if (el.tagName && el.tagName.toUpperCase() === 'IFRAME') {
+          try {
+            const doc = el.contentDocument;
+            if (doc) {
+              results.push(...collectAllElements(doc, selector));
+            }
+          } catch {}
+        }
       }
       return results;
+    }
+
+    function getViewportRect(el) {
+      const rect = el.getBoundingClientRect();
+      let offsetX = 0;
+      let offsetY = 0;
+      try {
+        let win = el.ownerDocument ? el.ownerDocument.defaultView : null;
+        while (win && win !== window && win.frameElement) {
+          const frameRect = win.frameElement.getBoundingClientRect();
+          offsetX += frameRect.left;
+          offsetY += frameRect.top;
+          win = win.parent;
+        }
+      } catch {}
+      return {
+        left: rect.left + offsetX,
+        top: rect.top + offsetY,
+        right: rect.right + offsetX,
+        bottom: rect.bottom + offsetY,
+        x: rect.x + offsetX,
+        y: rect.y + offsetY,
+        width: rect.width,
+        height: rect.height,
+      };
     }
 
     function isElementVisible(el) {
@@ -82,7 +115,8 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
         if (cur.getAttribute('aria-hidden') === 'true' || cur.hasAttribute('hidden')) {
           return false;
         }
-        const style = window.getComputedStyle(cur);
+        const view = (cur.ownerDocument && cur.ownerDocument.defaultView) || window;
+        const style = view.getComputedStyle(cur);
         if (
           style.display === 'none' ||
           style.visibility === 'hidden' ||
@@ -94,10 +128,18 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
           return false;
         }
         const rootNode = cur.getRootNode && cur.getRootNode();
-        cur = cur.parentElement || (rootNode && rootNode.host) || null;
+        let next = cur.parentElement || (rootNode && rootNode.host) || null;
+        if (!next && cur.ownerDocument && cur.ownerDocument !== document) {
+          try {
+            next = cur.ownerDocument.defaultView ? cur.ownerDocument.defaultView.frameElement : null;
+          } catch {
+            next = null;
+          }
+        }
+        cur = next;
       }
 
-      const rect = el.getBoundingClientRect();
+      const rect = getViewportRect(el);
       if (rect.width < 2 || rect.height < 2) return false;
       const docLeft = rect.left + (window.scrollX || 0);
       const docTop = rect.top + (window.scrollY || 0);
@@ -133,6 +175,7 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
     }
 
     function computeName(el) {
+      const ownerDoc = el.ownerDocument || document;
       const ariaLabel = el.getAttribute('aria-label');
       if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
 
@@ -140,13 +183,13 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
       if (labelledBy) {
         const parts = labelledBy
           .split(/\\s+/)
-          .map((id) => document.getElementById(id)?.textContent?.trim() || '')
+          .map((id) => ownerDoc.getElementById(id)?.textContent?.trim() || '')
           .filter(Boolean);
         if (parts.length > 0) return parts.join(' ');
       }
 
       if (el.id) {
-        const label = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+        const label = ownerDoc.querySelector('label[for="' + CSS.escape(el.id) + '"]');
         if (label && label.textContent?.trim()) return label.textContent.trim();
       }
 
@@ -199,7 +242,7 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
 
       const id = nextId++;
       el.setAttribute('data-realmaya-id', String(id));
-      const rect = el.getBoundingClientRect();
+      const rect = getViewportRect(el);
       const role = computeRole(el);
       const tag = el.tagName.toLowerCase();
       const name = computeName(el).replace(/\\s+/g, ' ').slice(0, 120);
@@ -286,19 +329,46 @@ export function buildSetOfMarkExpression(): string {
     container.setAttribute('aria-hidden', 'true');
     container.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;overflow:hidden;';
 
-    const elements = document.querySelectorAll('[data-realmaya-id]');
+    function collectMarked(root) {
+      const results = Array.from(root.querySelectorAll('[data-realmaya-id]'));
+      const all = root.querySelectorAll('*');
+      for (const el of all) {
+        if (el.shadowRoot) {
+          results.push(...collectMarked(el.shadowRoot));
+        }
+        if (el.tagName && el.tagName.toUpperCase() === 'IFRAME') {
+          try {
+            if (el.contentDocument) results.push(...collectMarked(el.contentDocument));
+          } catch {}
+        }
+      }
+      return results;
+    }
+
+    const elements = collectMarked(document);
     let count = 0;
     for (const el of elements) {
       const id = el.getAttribute('data-realmaya-id');
       if (!id) continue;
       const rect = el.getBoundingClientRect();
+      let offsetX = 0;
+      let offsetY = 0;
+      try {
+        let win = el.ownerDocument ? el.ownerDocument.defaultView : null;
+        while (win && win !== window && win.frameElement) {
+          const fr = win.frameElement.getBoundingClientRect();
+          offsetX += fr.left;
+          offsetY += fr.top;
+          win = win.parent;
+        }
+      } catch {}
       if (rect.width < 2 || rect.height < 2) continue;
 
       const box = document.createElement('div');
       box.style.cssText = [
         'position:fixed',
-        'left:' + Math.max(0, Math.round(rect.left)) + 'px',
-        'top:' + Math.max(0, Math.round(rect.top)) + 'px',
+        'left:' + Math.max(0, Math.round(rect.left + offsetX)) + 'px',
+        'top:' + Math.max(0, Math.round(rect.top + offsetY)) + 'px',
         'width:' + Math.round(rect.width) + 'px',
         'height:' + Math.round(rect.height) + 'px',
         'border:2px solid #e11d48',
