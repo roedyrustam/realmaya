@@ -1,0 +1,56 @@
+{
+  "name": "realmaya",
+  "version": "0.1.0",
+  "description": "AI-native headless browser automation library (Chrome & Firefox via WebDriver BiDi) with Token-Compressed Semantic Distiller, Speculative Branching, and native MCP v1.x server.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/src/mcp/server.d.ts",
+      "import": "./dist/src/mcp/server.js"
+    }
+  },
+  "bin": {
+    "realmaya": "./dist/bin/realmaya.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check src tests bin",
+    "mcp": "node dist/bin/realmaya.js mcp"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "browser-automation",
+    "webdriver-bidi",
+    "headless-chrome",
+    "headless-firefox",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "semantic-dom"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.12.1",
+    "zod": "3.24.2"
+  },
+  "overrides": {
+    "zod-to-json-schema": "3.24.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}
