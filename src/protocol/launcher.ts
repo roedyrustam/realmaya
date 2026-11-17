@@ -163,10 +163,18 @@ export async function launchBrowserProcess(
     });
   });
 
+  const onProcessExit = () => {
+    if (!child.killed) {
+      child.kill('SIGKILL');
+    }
+  };
+  process.once('exit', onProcessExit);
+
   let killed = false;
   const kill = async () => {
     if (killed) return;
     killed = true;
+    process.removeListener('exit', onProcessExit);
     if (!child.killed) {
       child.kill('SIGTERM');
       await new Promise<void>((resolve) => {

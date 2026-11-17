@@ -1,4 +1,4 @@
-import type { BrowserCookie, BrowserEngine, NavigateOptions } from '../types.js';
+import type { BrowserCookie, BrowserEngine, NavigateOptions, NetworkExchange } from '../types.js';
 import type { RpcTransport } from './bidi-client.js';
 
 export interface PageHandle {
@@ -20,6 +20,7 @@ export interface DriverAdapter {
   screenshot(handle: PageHandle): Promise<string>;
   getCookies(handle: PageHandle): Promise<BrowserCookie[]>;
   setCookies(handle: PageHandle, cookies: BrowserCookie[]): Promise<void>;
+  onNetworkExchange?(cb: (entry: NetworkExchange) => void): () => void;
 }
 
 /** WebDriver BiDi adapter (native Firefox & BiDi-compliant endpoints). */
@@ -34,9 +35,14 @@ export class BidiDriverAdapter implements DriverAdapter {
 
   async initialize(): Promise<void> {
     await this.rpc.send('session.new', { capabilities: {} });
+    await this.rpc
+      .send('session.subscribe', { events: ['network.responseCompleted'] })
+      .catch(() => {});
   }
 
-  async createPage(isolatedContextId?: string): Promise<{ handle: PageHandle; ownsContext: boolean }> {
+  async createPage(
+    isolatedContextId?: string,
+  ): Promise<{ handle: PageHandle; ownsContext: boolean }> {
     let contextId = isolatedContextId;
     let ownsContext = false;
 
@@ -109,9 +115,10 @@ export class BidiDriverAdapter implements DriverAdapter {
     );
     return (res.cookies ?? []).map((c) => ({
       name: String(c.name ?? ''),
-      value: typeof c.value === 'object' && c.value !== null
-        ? String((c.value as Record<string, unknown>).value ?? '')
-        : String(c.value ?? ''),
+      value:
+        typeof c.value === 'object' && c.value !== null
+          ? String((c.value as Record<string, unknown>).value ?? '')
+          : String(c.value ?? ''),
       domain: String(c.domain ?? ''),
       ...(c.path ? { path: String(c.path) } : {}),
       ...(typeof c.httpOnly === 'boolean' ? { httpOnly: c.httpOnly } : {}),
@@ -134,6 +141,23 @@ export class BidiDriverAdapter implements DriverAdapter {
       });
     }
   }
+
+  onNetworkExchange(cb: (entry: NetworkExchange) => void): () => void {
+    return this.rpc.on('network.responseCompleted', (params) => {
+      const request = (params.request as Record<string, unknown> | undefined) ?? {};
+      const response = (params.response as Record<string, unknown> | undefined) ?? {};
+      const url = String(response.url ?? request.url ?? '');
+      if (!url) return;
+      const mimeType = typeof response.mimeType === 'string' ? response.mimeType : undefined;
+      cb({
+        url,
+        method: String(request.method ?? 'GET'),
+        status: Number(response.status ?? 200),
+        ...(mimeType ? { mimeType } : {}),
+        timestamp: Date.now(),
+      });
+    });
+  }
 }
 
 /** Chrome DevTools Protocol (CDP) adapter for zero-driver headless Chrome. */
@@ -149,7 +173,9 @@ export class CdpDriverAdapter implements DriverAdapter {
     // Browser-level WebSocket is ready immediately upon connect
   }
 
-  async createPage(isolatedContextId?: string): Promise<{ handle: PageHandle; ownsContext: boolean }> {
+  async createPage(
+    isolatedContextId?: string,
+  ): Promise<{ handle: PageHandle; ownsContext: boolean }> {
     let contextId = isolatedContextId;
     let ownsContext = false;
 
@@ -175,6 +201,7 @@ export class CdpDriverAdapter implements DriverAdapter {
     const sessionId = attached.sessionId;
     await this.rpc.send('Page.enable', {}, sessionId);
     await this.rpc.send('Runtime.enable', {}, sessionId);
+    await this.rpc.send('Network.enable', {}, sessionId).catch(() => {});
 
     return {
       handle: { pageId: sessionId, contextId },
@@ -197,7 +224,8 @@ export class CdpDriverAdapter implements DriverAdapter {
       wait === 'none'
         ? Promise.resolve()
         : new Promise<void>((resolve) => {
-            const eventName = wait === 'interactive' ? 'Page.domContentEventFired' : 'Page.loadEventFired';
+            const eventName =
+              wait === 'interactive' ? 'Page.domContentEventFired' : 'Page.loadEventFired';
             const unsub = this.rpc.on(eventName, () => {
               unsub();
               resolve();
@@ -277,5 +305,37 @@ export class CdpDriverAdapter implements DriverAdapter {
       },
       handle.pageId,
     );
+  }
+
+  onNetworkExchange(cb: (entry: NetworkExchange) => void): () => void {
+    const methodsByReqId = new Map<string, string>();
+    const unsubReq = this.rpc.on('Network.requestWillBeSent', (params) => {
+      const reqId = typeof params.requestId === 'string' ? params.requestId : undefined;
+      const req = (params.request as Record<string, unknown> | undefined) ?? {};
+      if (reqId && typeof req.method === 'string') {
+        methodsByReqId.set(reqId, req.method);
+      }
+    });
+    const unsubRes = this.rpc.on('Network.responseReceived', (params) => {
+      const reqId = typeof params.requestId === 'string' ? params.requestId : '';
+      const response = (params.response as Record<string, unknown> | undefined) ?? {};
+      const url = String(response.url ?? '');
+      if (!url) return;
+      const method =
+        methodsByReqId.get(reqId) ?? (typeof params.method === 'string' ? params.method : 'GET');
+      methodsByReqId.delete(reqId);
+      const mimeType = typeof response.mimeType === 'string' ? response.mimeType : undefined;
+      cb({
+        url,
+        method,
+        status: Number(response.status ?? 200),
+        ...(mimeType ? { mimeType } : {}),
+        timestamp: Date.now(),
+      });
+    });
+    return () => {
+      unsubReq();
+      unsubRes();
+    };
   }
 }

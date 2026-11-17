@@ -1,9 +1,13 @@
 import { IntentEngine } from '../ai/intent-engine.js';
 import { RpcTransport } from '../protocol/bidi-client.js';
-import { BidiDriverAdapter, CdpDriverAdapter, type DriverAdapter } from '../protocol/driver-adapter.js';
+import {
+  BidiDriverAdapter,
+  CdpDriverAdapter,
+  type DriverAdapter,
+} from '../protocol/driver-adapter.js';
 import { type LaunchedBrowser, launchBrowserProcess } from '../protocol/launcher.js';
 import { LocatorCache } from '../semantic/locator-cache.js';
-import type { Browser, BrowserEngine, LaunchOptions, Page } from '../types.js';
+import type { Browser, BrowserEngine, ConnectOptions, LaunchOptions, Page } from '../types.js';
 import { BranchManager } from './branch-manager.js';
 import { RealmayaPage } from './page.js';
 
@@ -12,7 +16,7 @@ export class RealmayaBrowser implements Browser {
 
   private readonly transport: RpcTransport;
   private readonly driver: DriverAdapter;
-  private readonly launched: LaunchedBrowser;
+  private readonly launched: LaunchedBrowser | undefined;
   private readonly cache: LocatorCache;
   private readonly intentEngine: IntentEngine;
   private readonly branchManager: BranchManager;
@@ -23,7 +27,7 @@ export class RealmayaBrowser implements Browser {
     engine: BrowserEngine;
     transport: RpcTransport;
     driver: DriverAdapter;
-    launched: LaunchedBrowser;
+    launched?: LaunchedBrowser;
     cache: LocatorCache;
     intentEngine: IntentEngine;
     branchManager: BranchManager;
@@ -57,7 +61,7 @@ export class RealmayaBrowser implements Browser {
       await driver.initialize();
 
       const cache = new LocatorCache(opts.cachePath);
-      const intentEngine = new IntentEngine(cache, opts.llm);
+      const intentEngine = new IntentEngine(cache, opts.llm, opts.onDestructiveAction);
       const branchManager = new BranchManager(opts.maxBranches ?? 10);
 
       return new RealmayaBrowser({
@@ -72,6 +76,36 @@ export class RealmayaBrowser implements Browser {
     } catch (err) {
       await transport.close().catch(() => {});
       await launched.kill().catch(() => {});
+      throw err;
+    }
+  }
+
+  static async connect(opts: ConnectOptions): Promise<RealmayaBrowser> {
+    const engine: BrowserEngine = opts.engine ?? 'chrome';
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const transport = new RpcTransport(timeoutMs);
+    try {
+      await transport.connect(opts.wsUrl);
+      const driver: DriverAdapter =
+        engine === 'firefox'
+          ? new BidiDriverAdapter(engine, transport)
+          : new CdpDriverAdapter(transport);
+      await driver.initialize();
+
+      const cache = new LocatorCache(opts.cachePath);
+      const intentEngine = new IntentEngine(cache, opts.llm, opts.onDestructiveAction);
+      const branchManager = new BranchManager(opts.maxBranches ?? 10);
+
+      return new RealmayaBrowser({
+        engine,
+        transport,
+        driver,
+        cache,
+        intentEngine,
+        branchManager,
+      });
+    } catch (err) {
+      await transport.close().catch(() => {});
       throw err;
     }
   }
@@ -111,7 +145,7 @@ export class RealmayaBrowser implements Browser {
     await Promise.all(pages.map((p) => p.close().catch(() => {})));
     this.openPages.clear();
     await this.transport.close().catch(() => {});
-    await this.launched.kill().catch(() => {});
+    await this.launched?.kill().catch(() => {});
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

@@ -10,14 +10,42 @@ export interface CachedLocatorEntry {
   fingerprint: string;
   role: string;
   name: string;
+  fallbackSelector?: string;
   hitCount: number;
   lastVerifiedAt: number;
 }
 
+interface SqliteStatement {
+  all(...params: unknown[]): Array<Record<string, unknown>>;
+  run(...params: unknown[]): unknown;
+}
+
+interface SqliteDatabaseSync {
+  exec(sql: string): void;
+  prepare(sql: string): SqliteStatement;
+  close(): void;
+}
+
+const LOCATOR_CACHE_DDL = `
+CREATE TABLE IF NOT EXISTS locator_cache (
+  id TEXT PRIMARY KEY,
+  origin TEXT NOT NULL,
+  intent_hash TEXT NOT NULL,
+  fingerprint_json TEXT NOT NULL,
+  hit_count INTEGER NOT NULL DEFAULT 1,
+  last_verified_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_locator_origin_intent
+  ON locator_cache (origin, intent_hash);
+`;
+
 /**
  * Self-healing semantic locator cache. Stores verified semantic fingerprints
  * keyed by `(origin, normalizedIntent)` and resolves matching or closely
- * similar elements without spending LLM tokens.
+ * similar elements without spending LLM tokens. Supports both JSON and SQLite
+ * (`.db` / `.sqlite`) persistence.
  */
 export class LocatorCache {
   private readonly entries = new Map<string, CachedLocatorEntry>();
@@ -34,6 +62,27 @@ export class LocatorCache {
     return `${origin}::${hash}`;
   }
 
+  private isSqlitePath(): boolean {
+    return Boolean(this.persistPath && /\.(db|sqlite|sqlite3)$/i.test(this.persistPath));
+  }
+
+  private async openSqliteDb(): Promise<SqliteDatabaseSync | null> {
+    if (!this.persistPath || !this.isSqlitePath()) return null;
+    try {
+      await mkdir(dirname(this.persistPath), { recursive: true });
+      const modName = 'node:sqlite';
+      const sqliteMod = (await import(modName)) as {
+        DatabaseSync?: new (path: string) => SqliteDatabaseSync;
+      };
+      if (!sqliteMod.DatabaseSync) return null;
+      const db = new sqliteMod.DatabaseSync(this.persistPath);
+      db.exec(LOCATOR_CACHE_DDL);
+      return db;
+    } catch {
+      return null;
+    }
+  }
+
   private async ensureLoaded(): Promise<void> {
     if (this.loaded || !this.persistPath) {
       this.loaded = true;
@@ -41,6 +90,49 @@ export class LocatorCache {
     }
     this.loaded = true;
     if (!existsSync(this.persistPath)) return;
+
+    if (this.isSqlitePath()) {
+      const db = await this.openSqliteDb();
+      if (db) {
+        try {
+          const rows = db
+            .prepare(
+              'SELECT id, origin, intent_hash, fingerprint_json, hit_count, last_verified_at FROM locator_cache',
+            )
+            .all();
+          for (const row of rows) {
+            const id = String(row.id ?? '');
+            if (!id) continue;
+            const parsedFp = JSON.parse(String(row.fingerprint_json ?? '{}')) as {
+              fingerprint?: string;
+              role?: string;
+              name?: string;
+              fallbackSelector?: string;
+            };
+            this.entries.set(id, {
+              origin: String(row.origin ?? ''),
+              intentHash: String(row.intent_hash ?? ''),
+              fingerprint: String(parsedFp.fingerprint ?? ''),
+              role: String(parsedFp.role ?? ''),
+              name: String(parsedFp.name ?? ''),
+              ...(parsedFp.fallbackSelector ? { fallbackSelector: parsedFp.fallbackSelector } : {}),
+              hitCount: Number(row.hit_count ?? 1),
+              lastVerifiedAt: Number(row.last_verified_at ?? Date.now()),
+            });
+          }
+          return;
+        } catch {
+          // Fall through to JSON fallback if file was saved as JSON
+        } finally {
+          try {
+            db.close();
+          } catch {
+            // Ignore close errors
+          }
+        }
+      }
+    }
+
     try {
       const raw = await readFile(this.persistPath, 'utf8');
       const parsed = JSON.parse(raw) as Record<string, CachedLocatorEntry>;
@@ -55,12 +147,58 @@ export class LocatorCache {
   private async flush(): Promise<void> {
     if (!this.persistPath) return;
     await mkdir(dirname(this.persistPath), { recursive: true });
+
+    if (this.isSqlitePath()) {
+      const db = await this.openSqliteDb();
+      if (db) {
+        try {
+          const stmt = db.prepare(`
+            INSERT INTO locator_cache (id, origin, intent_hash, fingerprint_json, hit_count, last_verified_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              fingerprint_json = excluded.fingerprint_json,
+              hit_count = excluded.hit_count,
+              last_verified_at = excluded.last_verified_at
+          `);
+          const now = Date.now();
+          for (const [id, entry] of this.entries.entries()) {
+            const fpJson = JSON.stringify({
+              fingerprint: entry.fingerprint,
+              role: entry.role,
+              name: entry.name,
+              ...(entry.fallbackSelector ? { fallbackSelector: entry.fallbackSelector } : {}),
+            });
+            stmt.run(
+              id,
+              entry.origin,
+              entry.intentHash,
+              fpJson,
+              entry.hitCount,
+              entry.lastVerifiedAt,
+              now,
+            );
+          }
+          return;
+        } finally {
+          try {
+            db.close();
+          } catch {
+            // Ignore close errors
+          }
+        }
+      }
+    }
+
     const obj = Object.fromEntries(this.entries.entries());
     await writeFile(this.persistPath, JSON.stringify(obj, null, 2), 'utf8');
   }
 
   /** Attempts to match a previously verified element against the current page snapshot. */
-  async resolve(origin: string, intent: string, nodes: SemanticNode[]): Promise<SemanticNode | null> {
+  async resolve(
+    origin: string,
+    intent: string,
+    nodes: SemanticNode[],
+  ): Promise<SemanticNode | null> {
     await this.ensureLoaded();
     const key = LocatorCache.makeKey(origin, intent);
     const entry = this.entries.get(key);
@@ -71,6 +209,9 @@ export class LocatorCache {
     if (exact) {
       entry.hitCount += 1;
       entry.lastVerifiedAt = Date.now();
+      if (exact.fallbackSelector) {
+        entry.fallbackSelector = exact.fallbackSelector;
+      }
       await this.flush();
       return exact;
     }
@@ -99,6 +240,9 @@ export class LocatorCache {
     if (bestNode) {
       entry.fingerprint = bestNode.fingerprint;
       entry.name = bestNode.name;
+      if (bestNode.fallbackSelector) {
+        entry.fallbackSelector = bestNode.fallbackSelector;
+      }
       entry.hitCount += 1;
       entry.lastVerifiedAt = Date.now();
       await this.flush();
@@ -117,6 +261,7 @@ export class LocatorCache {
       fingerprint: node.fingerprint,
       role: node.role,
       name: node.name,
+      ...(node.fallbackSelector ? { fallbackSelector: node.fallbackSelector } : {}),
       hitCount: 1,
       lastVerifiedAt: Date.now(),
     });
@@ -126,8 +271,10 @@ export class LocatorCache {
   /** Clears all in-memory and persisted locator cache data. */
   async purge(): Promise<void> {
     this.entries.clear();
-    if (this.persistPath && existsSync(this.persistPath)) {
-      await rm(this.persistPath, { force: true });
+    if (this.persistPath) {
+      await rm(this.persistPath, { force: true }).catch(() => {});
+      await rm(`${this.persistPath}-wal`, { force: true }).catch(() => {});
+      await rm(`${this.persistPath}-shm`, { force: true }).catch(() => {});
     }
   }
 

@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { McpSamplingProvider } from '../ai/mcp-sampling.js';
 import { RealmayaBrowser } from '../browser/browser.js';
+import { LocatorCache } from '../semantic/locator-cache.js';
 import type { Browser, BrowserEngine, LlmProvider, Page } from '../types.js';
 
 export interface McpServerOptions {
@@ -70,6 +71,24 @@ export class RealmayaMcpSession {
   registerPage(page: Page): void {
     this.pages.set(page.id, page);
     this.activePageId = page.id;
+  }
+
+  listPages(): Array<{ pageId: string; contextId: string; isActive: boolean }> {
+    return Array.from(this.pages.values()).map((page) => ({
+      pageId: page.id,
+      contextId: page.contextId,
+      isActive: page.id === this.activePageId,
+    }));
+  }
+
+  async purgeCache(): Promise<void> {
+    if (this.browser) {
+      await this.browser.clearAllData();
+    }
+    if (this.cachePath) {
+      const cache = new LocatorCache(this.cachePath);
+      await cache.purge();
+    }
   }
 
   async closePage(pageId?: string): Promise<string> {
@@ -215,6 +234,30 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
   );
 
   server.registerTool(
+    'browser_extract',
+    {
+      description:
+        'Extract structured JSON data from the active or specified page using the Semantic Distiller.',
+      inputSchema: {
+        instruction: z.string().min(1),
+        fields: z.array(z.string()).optional(),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ instruction, fields, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      const schema =
+        fields && fields.length > 0
+          ? z.object(Object.fromEntries(fields.map((f) => [f, z.unknown()])))
+          : z.record(z.unknown());
+      const extracted = await page.extract(instruction, schema);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(extracted) }],
+      };
+    },
+  );
+
+  server.registerTool(
     'browser_click',
     {
       description: 'Click an element by its distilled numeric ID or CSS selector.',
@@ -253,6 +296,70 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
   );
 
   server.registerTool(
+    'browser_select',
+    {
+      description:
+        'Select an option in a <select> element by its distilled numeric ID or CSS selector.',
+      inputSchema: {
+        selectorOrId: z.union([z.number().int().positive(), z.string().min(1)]),
+        value: z.string(),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ selectorOrId, value, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      await page.select(selectorOrId, value);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, pageId: page.id, value }) }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'browser_press',
+    {
+      description:
+        'Press a keyboard key on an element by its distilled numeric ID or CSS selector.',
+      inputSchema: {
+        selectorOrId: z.union([z.number().int().positive(), z.string().min(1)]),
+        key: z.string().min(1),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ selectorOrId, key, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      await page.press(selectorOrId, key);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, pageId: page.id, key }) }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'browser_scroll',
+    {
+      description: 'Scroll the page or a specific element by delta or into view.',
+      inputSchema: {
+        x: z.number().optional(),
+        y: z.number().optional(),
+        selectorOrId: z.union([z.number().int().positive(), z.string().min(1)]).optional(),
+        pageId: z.string().optional(),
+      },
+    },
+    async ({ x, y, selectorOrId, pageId }) => {
+      const page = await session.ensurePage(pageId);
+      await page.scroll({
+        ...(x !== undefined ? { x } : {}),
+        ...(y !== undefined ? { y } : {}),
+        ...(selectorOrId !== undefined ? { selectorOrId } : {}),
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, pageId: page.id }) }],
+      };
+    },
+  );
+
+  server.registerTool(
     'browser_fork',
     {
       description:
@@ -283,18 +390,57 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
   );
 
   server.registerTool(
+    'browser_list_pages',
+    {
+      description: 'List all open pages and speculative fork() branches in the current MCP session.',
+      inputSchema: {},
+    },
+    async () => {
+      const pages = session.listPages();
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, pages }) }],
+      };
+    },
+  );
+
+  server.registerTool(
     'browser_screenshot',
     {
-      description: 'Capture a PNG screenshot of the active or specified page.',
+      description:
+        'Capture a PNG screenshot of the active or specified page, with optional Set-of-Mark [id] overlays.',
       inputSchema: {
         pageId: z.string().optional(),
+        setOfMark: z.boolean().optional(),
       },
     },
-    async ({ pageId }) => {
+    async ({ pageId, setOfMark }) => {
       const page = await session.ensurePage(pageId);
-      const data = await page.screenshot();
+      const data = await page.screenshot(setOfMark ? { setOfMark: true } : undefined);
       return {
         content: [{ type: 'image', data, mimeType: 'image/png' }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'browser_purge',
+    {
+      description:
+        'Clear all local self-healing locator caches and session data (GDPR Art. 17 / local privacy compliance).',
+      inputSchema: {},
+    },
+    async () => {
+      await session.purgeCache();
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              message: 'Cleared all local self-healing locator caches and session data.',
+            }),
+          },
+        ],
       };
     },
   );

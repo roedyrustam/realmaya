@@ -3,58 +3,19 @@
 > Surgical interface & boundary slice for Swarm Fan-Out. Keep <300 tokens per subagent slice.
 
 ## Core Domain Contracts (`src/types.ts`)
-```ts
-export type BrowserEngine = 'chrome' | 'firefox';
-
-export interface LaunchOptions {
-  engine?: BrowserEngine; // default: 'chrome'
-  headless?: boolean;     // default: true
-  executablePath?: string;
-  args?: string[];
-  llm?: LlmProvider;
-  maxBranches?: number;   // default: 10
-}
-
-export interface SemanticNode {
-  id: number;             // ephemeral interactive ID [1..N]
-  role: string;
-  name: string;
-  tag: string;
-  value?: string;
-  placeholder?: string;
-  disabled?: boolean;
-  bbox: { x: number; y: number; w: number; h: number };
-}
-
-export interface DistilledPage {
-  url: string;
-  title: string;
-  tokenEstimate: number;
-  treeText: string;       // <untrusted_dom> wrapped compact representation
-  nodes: SemanticNode[];
-}
-
-export interface LlmProvider {
-  readonly name: string;
-  completeJson<T>(params: {
-    system: string;
-    prompt: string;
-    schema: unknown;      // Zod schema
-  }): Promise<T>;
-}
-
-export interface Page extends AsyncDisposable {
-  goto(url: string, opts?: { waitUntil?: 'load' | 'domcontentloaded' }): Promise<void>;
-  observe(opts?: { mode?: 'interactive' | 'viewport' | 'full'; maxTokens?: number }): Promise<DistilledPage>;
-  act(instruction: string): Promise<{ ok: boolean; nodeId?: number; cached: boolean }>;
-  extract<T>(instruction: string, schema: unknown): Promise<T>;
-  fork(opts?: { ttlMs?: number }): Promise<Page>;
-  close(): Promise<void>;
-}
-```
+- `LaunchOptions`: adds `onDestructiveAction?: DestructiveActionGuard`
+- `ConnectOptions`: `{ wsUrl: string; engine?: BrowserEngine; llm?: LlmProvider; maxBranches?: number; cachePath?: string; timeoutMs?: number; onDestructiveAction?: DestructiveActionGuard }`
+- `SemanticNode`: adds `options?: string[]`, `fallbackSelector?: string`
+- `DistilledPage`: adds `contentBlocks?: string[]`
+- `ActionResult`: `action: 'click' | 'type' | 'select' | 'press' | 'scroll' | 'noop'`, `blockedByGuard?: boolean`
+- `Page`: adds `select()`, `press()`, `scroll()`, `waitForSelector()`, `screenshot(opts?: ScreenshotOptions)`, `getNetworkLog()`, `clearNetworkLog()`, `mockRoute()`
 
 ## Swarm Slice Ownership
-- **Slice 1 (`src/protocol/`, `src/browser/`):** BiDi WebSocket client, Chrome/Firefox launcher, `Browser`, `Page`, `fork()` reaper.
-- **Slice 2 (`src/semantic/`):** In-page distiller script, prompt-injection firewall, `LocatorCache`.
-- **Slice 3 (`src/ai/`, `src/mcp/`, `bin/`):** `LlmProvider`, `McpSamplingProvider`, `IntentEngine`, MCP v1.x server (`stdio` + `Streamable HTTP`), CLI.
-- **Slice 4 (`tests/`):** Vitest unit/contract tests, Chrome & Firefox headless integration tests, security/firewall red-team tests.
+- **Slice 1 & 2 (`fullstack-craftsman` — `src/semantic/`, `src/protocol/`, `src/browser/`, `src/index.ts`)**:
+  - `src/semantic/firewall.ts`: Delimiter-breakout prevention (`<untrusted_dom>` / `</untrusted_dom>` stripping), `detectPromptInjectionPatterns(text)`, `isDestructiveIntent(instruction, node)`.
+  - `src/semantic/distiller.ts`: Open Shadow DOM traversal, ancestor `opacity:0`/`visibility:hidden`/`font-size:0`/`clip-path` & negative off-screen coordinate trap filtering, `<select>` options extraction, `mode === 'full'` semantic `contentBlocks` (`h1..h6, p, li, th, td, pre, code, blockquote, article, [role="heading"], [role="alert"]`), `fallbackSelector` preservation, and `buildSetOfMarkExpression()` / `buildRemoveSetOfMarkExpression()`.
+  - `src/semantic/locator-cache.ts`: JSON + optional SQLite (`node:sqlite` for `.db`/`.sqlite` paths) persistence + `fallbackSelector` storage.
+  - `src/protocol/` & `src/browser/`: Process exit cleanup in `launcher.ts`, `RealmayaBrowser.connect()`, `page.select()`, `page.press()`, `page.scroll()`, `page.waitForSelector()`, `page.screenshot({ setOfMark })`, `page.getNetworkLog()`, `page.clearNetworkLog()`, `page.mockRoute()`, and fallbackSelector self-healing on `click(id)`/`type(id)`/`select(id)`/`press(id)`.
+- **Slice 3 (`ai-mcp-engineer` — `src/ai/intent-engine.ts`, `src/mcp/server.ts`, `bin/realmaya.ts`)**:
+  - `src/ai/intent-engine.ts`: Support `'click' | 'type' | 'select' | 'press' | 'scroll' | 'noop'`, enforce `onDestructiveAction` confirmation guard hook.
+  - `src/mcp/server.ts`: Add `browser_extract`, `browser_select`, `browser_press`, `browser_scroll`, `browser_list_pages`, `browser_purge`, and `setOfMark` option on `browser_screenshot`.
