@@ -99,11 +99,15 @@ export function buildDistillerExpression(opts: ObserveOptions = {}): string {
 
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return false;
-      if (rect.right <= 0 || rect.bottom <= 0 || rect.left < -1000 || rect.top < -1000) {
+      const docLeft = rect.left + (window.scrollX || 0);
+      const docTop = rect.top + (window.scrollY || 0);
+      const docRight = rect.right + (window.scrollX || 0);
+      const docBottom = rect.bottom + (window.scrollY || 0);
+      if (docRight <= 0 || docBottom <= 0 || docLeft < -1000 || docTop < -1000) {
         return false;
       }
       if (MODE === 'viewport') {
-        if (rect.top > vh || rect.left > vw) {
+        if (rect.bottom <= 0 || rect.right <= 0 || rect.top > vh || rect.left > vw) {
           return false;
         }
       }

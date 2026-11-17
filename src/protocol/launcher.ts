@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -149,7 +149,9 @@ export async function launchBrowserProcess(
         settled = true;
         clearTimeout(timer);
         const rawUrl = match[1].trim();
-        resolve(engine === 'firefox' && !rawUrl.endsWith('/session') ? `${rawUrl}/session` : rawUrl);
+        resolve(
+          engine === 'firefox' && !rawUrl.endsWith('/session') ? `${rawUrl}/session` : rawUrl,
+        );
       }
     };
 

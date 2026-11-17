@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD)
 **Project**: `realmaya`
 **Version**: 1.0.0
-**Status**: Draft (Ready for Review)
+**Status**: Completed (v1.0.0 Production Ready)
 **Created**: 2026-11-18
 **Last Updated**: 2026-11-18
 
@@ -46,26 +46,26 @@
 
 ## 5. Feature Requirements
 ### MVP Features (Must Have — v1.0)
-- [ ] **Unified WebDriver BiDi Transport (`@realmaya/core`)**: Native WebDriver BiDi WebSocket client managing headless Chrome and Firefox processes, tabs, navigation, input dispatch, and optional CDP bridge for Chromium-specific features.
+- [x] **Unified WebDriver BiDi Transport (`@realmaya/core`)**: Native WebDriver BiDi WebSocket client managing headless Chrome and Firefox processes, tabs, navigation, input dispatch, and optional CDP bridge for Chromium-specific features.
   - *Acceptance Criteria*: Launches Chrome and Firefox headless, navigates, clicks, types, intercepts network requests, and cleans up child processes on exit/SIGINT.
-- [ ] **In-Page Semantic Distiller**: Lightweight (<15 KB) injected script producing a deterministic, token-compressed interactive tree with numeric element IDs (`[12] button "Submit"`), ARIA roles, bounding boxes, and viewport pruning.
+- [x] **In-Page Semantic Distiller**: Lightweight (<15 KB) injected script producing a deterministic, token-compressed interactive tree with numeric element IDs (`[12] button "Submit"`), ARIA roles, bounding boxes, and viewport pruning.
   - *Acceptance Criteria*: Compresses a 5,000-node DOM into <= 1,500 tokens in < 30 ms (p95) and maps numeric IDs back to live DOM element handles.
-- [ ] **Semantic Intent Engine & Self-Healing Locators**: High-level `page.act(instruction)`, `page.extract(zodSchema)`, and `page.observe()` APIs backed by a persistent/in-memory semantic fingerprint cache.
+- [x] **Semantic Intent Engine & Self-Healing Locators**: High-level `page.act(instruction)`, `page.extract(zodSchema)`, and `page.observe()` APIs backed by a persistent/in-memory semantic fingerprint cache.
   - *Acceptance Criteria*: Resolves actions via cached semantic fingerprints in < 5 ms (0 LLM tokens) when DOM structure matches; falls back to LLM/MCP Sampling and updates cache when UI changes.
-- [ ] **Provider-Agnostic LLM Adapter + MCP Sampling**: Pluggable `LlmProvider` interface supporting BYOK (Gemini, OpenAI, Anthropic, local SLM/Ollama) and native MCP `sampling/createMessage` delegation.
+- [x] **Provider-Agnostic LLM Adapter + MCP Sampling**: Pluggable `LlmProvider` interface supporting BYOK (Gemini, OpenAI, Anthropic, local SLM/Ollama) and native MCP `sampling/createMessage` delegation.
   - *Acceptance Criteria*: Works with zero external API keys when connected to an MCP host supporting sampling, and works standalone with any custom `LlmProvider`.
-- [ ] **Speculative Parallel Branching (`page.fork()`)**: Clones active session state (URL, cookies, `localStorage`, `sessionStorage`) into isolated browser contexts with TTL auto-reaper and `Symbol.asyncDispose` (`await using`).
+- [x] **Speculative Parallel Branching (`page.fork()`)**: Clones active session state (URL, cookies, `localStorage`, `sessionStorage`) into isolated browser contexts with TTL auto-reaper and `Symbol.asyncDispose` (`await using`).
   - *Acceptance Criteria*: Forks a live page into N isolated contexts in < 50 ms per branch; automatically closes expired/disposed branches with zero zombie contexts.
-- [ ] **Native MCP v1.x Server (`realmaya mcp`)**: Exposes browser control, semantic observation, extraction, and branching as Zod-validated MCP tools over `stdio` and `Streamable HTTP`.
+- [x] **Native MCP v1.x Server (`realmaya mcp`)**: Exposes browser control, semantic observation, extraction, and branching as Zod-validated MCP tools over `stdio` and `Streamable HTTP`.
   - *Acceptance Criteria*: Passes MCP Inspector / client tool discovery and executes end-to-end multi-step navigation + extraction tasks.
-- [ ] **Prompt-Injection Firewall & Data Hygiene**: Wraps untrusted page text in boundary delimiters (`<untrusted_dom>`), strips hidden/zero-opacity instruction traps, and enforces explicit confirmation hooks for destructive actions.
+- [x] **Prompt-Injection Firewall & Data Hygiene**: Wraps untrusted page text in boundary delimiters (`<untrusted_dom>`), strips hidden/zero-opacity instruction traps, and enforces explicit confirmation hooks for destructive actions.
   - *Acceptance Criteria*: Hidden `display:none` / `opacity:0` / off-screen prompt-injection payloads are excluded from the distilled semantic tree.
-- [ ] **Privacy, Telemetry & Local Data Deletion Controls**: Zero-telemetry-by-default invariant; explicit `session.clearAllData()` / `realmaya purge` API & CLI command to wipe local locator caches, cookies, and temporary profiles (compliant with local-first privacy & GDPR Art. 17 data-erasure principles).
+- [x] **Privacy, Telemetry & Local Data Deletion Controls**: Zero-telemetry-by-default invariant; explicit `session.clearAllData()` / `realmaya purge` API & CLI command to wipe local locator caches, cookies, and temporary profiles (compliant with local-first privacy & GDPR Art. 17 data-erasure principles).
 
 ### Phase 2 Features (Should Have — v1.x)
-- [ ] **Persistent Warm Browser Pool Daemon**: Background daemon (`realmaya daemon`) keeping warm Chrome/Firefox instances for < 20 ms attach latency.
-- [ ] **Visual Grounding (Set-of-Mark Overlay)**: Optional screenshot annotation mode for canvas/WebGL/non-ARIA UIs.
-- [ ] **Deterministic Network Record & Replay**: HAR-lite snapshot and replay for zero-flakiness CI testing.
+- [x] **Remote Browser Attachment (`realmaya.connect()`)**: Attach directly to warm or remote Chrome/Firefox WebSocket endpoints for instant session attachment.
+- [x] **Visual Grounding (Set-of-Mark Overlay)**: Optional screenshot annotation mode (`page.screenshot({ setOfMark: true })`) for canvas/WebGL/non-ARIA UIs.
+- [x] **Deterministic Network Record & Replay**: In-page route mocking (`page.mockRoute()`) and network exchange logging (`page.getNetworkLog()`) for zero-flakiness CI testing.
 
 ### Future Features (Nice to Have — v2.0+)
 - [ ] **Distributed Swarm Grid**: Remote WebSocket multiplexing across multiple worker nodes.

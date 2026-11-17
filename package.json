@@ -1,10 +1,25 @@
 {
   "name": "realmaya",
-  "version": "0.1.0",
-  "description": "AI-native headless browser automation library (Chrome & Firefox via WebDriver BiDi) with Token-Compressed Semantic Distiller, Speculative Branching, and native MCP v1.x server.",
+  "version": "1.0.0",
+  "description": "AI-native headless browser automation library & MCP v1.x server (Chrome CDP & Firefox WebDriver BiDi) with Token-Compressed Semantic Distiller, Self-Healing Locators, Speculative Branching, and Prompt-Injection Firewall.",
+  "author": "Roedy Rustam",
+  "license": "MIT",
+  "homepage": "https://github.com/roedyrustam/realmaya#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roedyrustam/realmaya.git"
+  },
+  "bugs": {
+    "url": "https://github.com/roedyrustam/realmaya/issues"
+  },
   "type": "module",
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -24,22 +39,35 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check src tests bin",
+    "format": "biome check --write src tests bin",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test",
     "mcp": "node dist/bin/realmaya.js mcp"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "keywords": [
+    "ai-agents",
     "browser-automation",
-    "webdriver-bidi",
+    "cdp",
+    "chrome-devtools-protocol",
+    "headless-browser",
     "headless-chrome",
     "headless-firefox",
+    "llm-agents",
     "mcp",
+    "mcp-sampling",
+    "mcp-server",
     "model-context-protocol",
-    "ai-agent",
-    "semantic-dom"
+    "playwright-alternative",
+    "prompt-injection-firewall",
+    "puppeteer-alternative",
+    "self-healing-locators",
+    "semantic-dom",
+    "typescript",
+    "web-scraping",
+    "webdriver-bidi"
   ],
-  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.12.1",
     "zod": "3.24.2"

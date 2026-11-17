@@ -392,7 +392,8 @@ export function createRealmayaMcpServer(opts: McpServerOptions = {}): {
   server.registerTool(
     'browser_list_pages',
     {
-      description: 'List all open pages and speculative fork() branches in the current MCP session.',
+      description:
+        'List all open pages and speculative fork() branches in the current MCP session.',
       inputSchema: {},
     },
     async () => {
@@ -479,10 +480,7 @@ export async function startStdioMcpServer(opts: McpServerOptions = {}): Promise<
 }
 
 /** Starts the `realmaya` MCP server over Streamable HTTP on the given port. */
-export async function startHttpMcpServer(
-  port = 3333,
-  opts: McpServerOptions = {},
-): Promise<void> {
+export async function startHttpMcpServer(port = 3333, opts: McpServerOptions = {}): Promise<void> {
   const { server, session } = createRealmayaMcpServer(opts);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),

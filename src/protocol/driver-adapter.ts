@@ -81,7 +81,7 @@ export class BidiDriverAdapter implements DriverAdapter {
   }
 
   async evaluateJson<T>(handle: PageHandle, expression: string): Promise<T> {
-    const wrapped = `JSON.stringify((() => { return (${expression}); })())`;
+    const wrapped = `(async () => JSON.stringify(await (${expression})))()`;
     const res = await this.rpc.send<{
       result?: { type?: string; value?: string };
       exceptionDetails?: { text?: string };
@@ -241,7 +241,7 @@ export class CdpDriverAdapter implements DriverAdapter {
   }
 
   async evaluateJson<T>(handle: PageHandle, expression: string): Promise<T> {
-    const wrapped = `JSON.stringify((() => { return (${expression}); })())`;
+    const wrapped = `(async () => JSON.stringify(await (${expression})))()`;
     const res = await this.rpc.send<{
       result?: { value?: unknown };
       exceptionDetails?: { text?: string };
