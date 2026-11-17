@@ -131,9 +131,11 @@ describe.skipIf(!hasChrome)('Live Headless Chrome Integration', () => {
       status: 200,
       body: { status: 'mocked-ok', quota: 5000 },
     });
-    const mockedResp = await page.evaluate<{ status: string; quota: number }>(
-      'fetch("https://api.example.com/api/quote").then((r) => r.json())',
+    await page.evaluate<boolean>(
+      'Boolean(fetch("https://api.example.com/api/quote").then((r) => r.json()).then((d) => { window.__mockResp = d; }))',
     );
+    await new Promise((r) => setTimeout(r, 50));
+    const mockedResp = await page.evaluate<{ status: string; quota: number }>('window.__mockResp');
     expect(mockedResp).toEqual({ status: 'mocked-ok', quota: 5000 });
     expect(Array.isArray(page.getNetworkLog())).toBe(true);
   });
